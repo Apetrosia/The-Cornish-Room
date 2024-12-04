@@ -18,11 +18,10 @@ namespace Room
 
         Face leftWall;
         Face rightWall;
+        Face frontWall;
         Face backWall;
-        Face cameraWall;
         Face ceiling;
         Face floor;
-        Cube cube;
 
         public Form1()
         {
@@ -45,14 +44,14 @@ namespace Room
                 roomSide,
                 Color.FromArgb(87, 210, 255),
                 new Material(0, 0, 0.9, 0.1, 0, 0));
-            backWall = new Face(new Vertex(center.x, center.y, center.z + roomSide / 2),
+            frontWall = new Face(new Vertex(center.x, center.y, center.z + roomSide / 2),
                 new Vector(0, 0, -1),
                 new Vector(0, 1, 0),
                 roomSide,
                 roomSide,
                 Color.LightGray,
                 new Material(0, 0, 0.9, 0.1, 0, 0));
-            cameraWall = new Face(new Vertex(center.x, center.y, center.z - roomSide / 2),
+            backWall = new Face(new Vertex(center.x, center.y, center.z - roomSide / 2),
                 new Vector(0, 0, 1),
                 new Vector(0, 1, 0),
                 roomSide,
@@ -74,23 +73,17 @@ namespace Room
                 Color.LightGray,
                 new Material(0, 0, 0.9, 0.1, 0, 0));
 
-            cube = new Cube(new Vertex(6, -9, 21), 7, Color.White, new Material(40, 0.25, 0.7, 0.05, 0, 0));
-
-            rayTracing = new RayTracing(new Room(center, roomSide, leftWall, rightWall, backWall, floor, ceiling, cameraWall),
+            rayTracing = new RayTracing(new Room(center, roomSide, leftWall, rightWall, frontWall, floor, ceiling, backWall),
                 new LightSource(new Vertex(0, 13, 14), 1, Color.FromArgb(255, 255, 240)));
 
-            //rayTracing.addShape(sphereOnCube);
-
-            
-            rayTracing.addShape(new Sphere(new Vertex(-5, -8, 20), 5, Color.Bisque, new Material(40, 0.25, 0.7, 0.05, 0, 1)));
-
-            rayTracing.addShape(cameraWall);
-            rayTracing.addShape(backWall);
-            rayTracing.addShape(ceiling);
-            rayTracing.addShape(floor);
-            rayTracing.addShape(rightWall);
-            rayTracing.addShape(leftWall);
-            rayTracing.addShape(cube);
+            rayTracing.addFigure(backWall);
+            rayTracing.addFigure(frontWall);
+            rayTracing.addFigure(ceiling);
+            rayTracing.addFigure(floor);
+            rayTracing.addFigure(rightWall);
+            rayTracing.addFigure(leftWall);
+            rayTracing.addFigure(new Cube(new Vertex(6, -9, 21), 7, Color.White, new Material(40, 0.25, 0.7, 0.05, 0, 0)));
+            rayTracing.addFigure(new Sphere(new Vertex(-5, -8, 20), 5, Color.Bisque, new Material(40, 0.25, 0.7, 0.05, 0, 0)));
 
             RenderRoom();
         }
@@ -98,8 +91,8 @@ namespace Room
         async void RenderRoom()
         {
             label1.Text = "Рендер...";
-            var bitmap = await Task.Run(() => rayTracing.compute(roomPictureBox.Width, roomPictureBox.Height));
-            roomPictureBox.Image = bitmap;
+            var bm = await Task.Run(() => rayTracing.Trace(roomPictureBox.Width, roomPictureBox.Height));
+            roomPictureBox.Image = bm;
             label1.Text = "Готово!";
         }
 
@@ -114,10 +107,10 @@ namespace Room
                     rightWall.material.reflectivity = (1 + rightWall.material.reflectivity) % 2;
                     break;
                 case 2:
-                    cameraWall.material.reflectivity = (1 + cameraWall.material.reflectivity) % 2;
+                    backWall.material.reflectivity = (1 + backWall.material.reflectivity) % 2;
                     break;
                 case 3:
-                    backWall.material.reflectivity = (1 + backWall.material.reflectivity) % 2;
+                    frontWall.material.reflectivity = (1 + frontWall.material.reflectivity) % 2;
                     break;
                 case 4:
                     floor.material.reflectivity = (1 + floor.material.reflectivity) % 2;
@@ -160,11 +153,25 @@ namespace Room
                     (int)numericUpDown3.Value);
             RenderRoom();
         }
+
+        private void checkedListBox2_ItemCheck(object sender, ItemCheckEventArgs e)
+        {
+            switch (e.Index)
+            {
+                case 0:
+                    rayTracing.figures[rayTracing.figures.Count - 2].material.reflectivity = (1 + rayTracing.figures[rayTracing.figures.Count - 2].material.reflectivity) % 2;
+                    break;
+                case 1:
+                    rayTracing.figures[rayTracing.figures.Count - 1].material.reflectivity = (1 + rayTracing.figures[rayTracing.figures.Count - 1].material.reflectivity) % 2;
+                    break;
+            }
+            RenderRoom();
+        }
     }
 
     class RayTracing
     {
-        List<Shape> figures;
+        public List<Figure> figures;
         const double fov = 80;
         Vertex cameraPosition = new Vertex(0, 0, 0);
         List<LightSource> lightSources = new List<LightSource>();
@@ -173,14 +180,11 @@ namespace Room
         public RayTracing(Room room, LightSource ls)
         {
             this.room = room;
-            figures = new List<Shape>();
+            figures = new List<Figure>();
             lightSources.Add(ls);
         }
 
-        public void addShape(Shape shape)
-        {
-            figures.Add(shape);
-        }
+        public void addFigure(Figure figure) => figures.Add(figure);
 
         public void AddLightSource(int x, int y, int z)
         {
@@ -188,10 +192,7 @@ namespace Room
             lightSources[0].intensity = 0.5;
         }
 
-        public void ChangeAddLightPos(int x, int y, int z)
-        {
-            lightSources[1].location = new Vertex(x, y, z);
-        }
+        public void ChangeAddLightPos(int x, int y, int z) => lightSources[1].location = new Vertex(x, y, z);
 
         public void RemoveLightSource()
         {
@@ -199,7 +200,7 @@ namespace Room
             lightSources[0].intensity = 1;
         }
 
-        static Color changeColorIntensity(Color color, double intensity, List<LightSource> lightSources)
+        static Color CalcColor(Color color, double intensity, List<LightSource> lightSources)
         {
             double finalR = 0;
             double finalG = 0;
@@ -229,32 +230,22 @@ namespace Room
 
         bool doesRayIntersectSomething(Vector direction, Vertex origin)
         {
-            foreach (var shape in figures)
+            foreach (var figure in figures)
             {
-                if (shape is Face)
-                {
+                if (figure is Face)
                     continue;
-                }
-                if (shape.getIntersection(direction, origin) != null)
-                {
+                if (figure.getIntersection(direction, origin) != null)
                     return true;
-                }
             }
 
             return false;
         }
 
-        Vector getLightReflectionRay(Vector shadowRay, Vector normale)
-        {
-            return (2 * (shadowRay ^ normale) * normale - shadowRay).normalize();
-        }
+        Vector getLightReflectionRay(Vector shadowRay, Vector normale) => (2 * (shadowRay ^ normale) * normale - shadowRay).normalize();
 
-        Vector getViewReflectionRay(Vector viewRay, Vector normale)
-        {
-            return (2 * ((-1 * viewRay) ^ normale) * normale - (-1 * viewRay)).normalize();
-        }
+        Vector getViewReflectionRay(Vector viewRay, Vector normale) => (2 * ((-1 * viewRay) ^ normale) * normale - (-1 * viewRay)).normalize();
 
-        double computeLightness(Shape shape, Tuple<Vertex, Vector> intersectionAndNormale, Vector viewRay)
+        double CalcLightness(Figure figure, Tuple<Vertex, Vector> intersectionAndNormale, Vector viewRay)
         {
             double diffuseLightness = 0;
             double specularLightness = 0;
@@ -266,19 +257,19 @@ namespace Room
                 var reflectionRay = getLightReflectionRay(shadowRay, intersectionAndNormale.Item2);
 
                 if (doesRayIntersectSomething(shadowRay, intersectionAndNormale.Item1))
-                    return ambientLightness * shape.material.kambient +
-                                    diffuseLightness * shape.material.kdiffuse +
-                                    specularLightness * shape.material.kspecular;
+                    return ambientLightness * figure.material.kambient +
+                                    diffuseLightness * figure.material.kdiffuse +
+                                    specularLightness * figure.material.kspecular;
 
                 diffuseLightness += ls.intensity * MyMath.Clamp(shadowRay ^ intersectionAndNormale.Item2,
                     0.0, double.MaxValue);
                 specularLightness += ls.intensity *
                                      Math.Pow(MyMath.Clamp(reflectionRay ^ (-1 * viewRay), 0.0, double.MaxValue),
-                                         shape.material.shininess);
+                                         figure.material.shininess);
             }
-            return ambientLightness * shape.material.kambient +
-                                    diffuseLightness * shape.material.kdiffuse +
-                                    specularLightness * shape.material.kspecular;
+            return ambientLightness * figure.material.kambient +
+                                    diffuseLightness * figure.material.kdiffuse +
+                                    specularLightness * figure.material.kspecular;
         }
 
         Color mixColors(Color first, Color second, double secondToFirstRatio)
@@ -286,39 +277,35 @@ namespace Room
             return Color.FromArgb((byte)((second.R * secondToFirstRatio) + first.R * (1 - secondToFirstRatio)), (byte)((second.G * secondToFirstRatio) + first.G * (1 - secondToFirstRatio)), (byte)((second.B * secondToFirstRatio) + first.B * (1 - secondToFirstRatio)));
         }
 
-        Color shootRay(Vector viewRay, Vertex origin, int depth = 0)
+        Color shootRay(Vector viewRay, Vertex origin, Color color, int depth = 0)
         {
             double nearestVertex = double.MaxValue;
-            if (depth > 4)
-            {
-                return Color.Gray;
-            }
+            if (depth > 5)
+                return color;
+
             Color res = Color.Black;
-            foreach (var shape in figures)
+            foreach (var figure in figures)
             {
                 Tuple<Vertex, Vector> intersectionAndNormale;
-                if ((intersectionAndNormale = shape.getIntersection(viewRay, origin)) != null &&
+                if ((intersectionAndNormale = figure.getIntersection(viewRay, origin)) != null &&
                     intersectionAndNormale.Item1.z < nearestVertex)
                 {
                     nearestVertex = intersectionAndNormale.Item1.z;
-                    res = changeColorIntensity(shape.color, computeLightness(shape, intersectionAndNormale, viewRay), lightSources);
-                    if (shape.material.reflectivity > 0)
+                    res = CalcColor(figure.color, CalcLightness(figure, intersectionAndNormale, viewRay), lightSources);
+                    if (figure.material.reflectivity > 0)
                     {
-                        var reflectedColor = shootRay(getViewReflectionRay(viewRay, intersectionAndNormale.Item2), intersectionAndNormale.Item1, depth + 1);
-                        res = mixColors(res, reflectedColor, shape.material.reflectivity);
-                    }
-                    if (shape.material.transparency > 0)
-                    {
-
+                        var reflectedColor = shootRay(getViewReflectionRay(viewRay, intersectionAndNormale.Item2), intersectionAndNormale.Item1, res, depth + 1);
+                        res = mixColors(res, reflectedColor, figure.material.reflectivity);
                     }
                 }
             }
+
             return res;
         }
 
-        public Bitmap compute(int width, int height)
+        public Bitmap Trace(int width, int height)
         {
-            var bitmap = new Bitmap(width, height);
+            var bm = new Bitmap(width, height);
 
             for (int x = 0; x < width; x++)
             {
@@ -329,16 +316,16 @@ namespace Room
                         width / height,
                         -(2 * (y + 0.5) / height - 1) * Math.Tan(MyMath.DegsToRads(fov / 2)),
                         1, true);
-                    var color = shootRay(ray, cameraPosition);
-                    bitmap.SetPixel(x, y, color);
+                    var color = shootRay(ray, cameraPosition, Color.Gray);
+                    bm.SetPixel(x, y, color);
                 }
             }
 
-            return bitmap;
+            return bm;
         }
     }
 
-    class Sphere : Shape
+    class Sphere : Figure
     {
         double radius;
 
@@ -349,7 +336,6 @@ namespace Room
             this.color = color;
             this.material = material;
         }
-
 
         public override Tuple<Vertex, Vector> getIntersection(Vector direction, Vertex origin)
         {
@@ -394,7 +380,7 @@ namespace Room
         }
     }
 
-    class Cube : Shape
+    class Cube : Figure
     {
         double side;
         private List<Face> faces;
@@ -430,18 +416,18 @@ namespace Room
         }
     }
 
-    class Room : Shape
+    class Room : Figure
     {
         double side;
         private List<Face> faces;
-        public Room(Vertex center, double side, Face leftWall, Face rightWall, Face backWall, Face floor, Face ceiling, Face cameraWall)
+        public Room(Vertex center, double side, Face leftWall, Face rightWall, Face frontWall, Face floor, Face ceiling, Face backWall)
         {
             this.center = center;
             this.side = side;
             faces = new List<Face>();
 
-            faces.Add(cameraWall);
             faces.Add(backWall);
+            faces.Add(frontWall);
             faces.Add(ceiling);
             faces.Add(floor);
             faces.Add(rightWall);
@@ -467,7 +453,7 @@ namespace Room
         }
     }
 
-    abstract class Shape
+    abstract class Figure
     {
         public Vertex center;
         public Color color;
@@ -476,7 +462,7 @@ namespace Room
         public abstract Tuple<Vertex, Vector> getIntersection(Vector direction, Vertex origin);
     }
 
-    class Face : Shape
+    class Face : Figure
     {
         double width;
         double height;
@@ -519,31 +505,25 @@ namespace Room
         public override Tuple<Vertex, Vector> getIntersection(Vector direction, Vertex origin)
         {
             if (Math.Abs(normal.x * (origin.x - center.x) + normal.y * (origin.y - center.y) + normal.z * (origin.z - center.z)) < 0.00001) // точка выпуска луча лежит в плоскости
-            {
                 return null;
-            }
 
             double tn = -(normal.x * center.x) - (normal.y * center.y) - (normal.z * center.z) + (normal.x * origin.x) + (normal.y * origin.y) + (normal.z * origin.z);
             if (Math.Abs(tn) < 0.00001)          // прямая лежит на плоскости, если знаменатель тоже 0, не интересно
-            {
                 return null;
-            }
+
             double td = normal.x * direction.x + normal.y * direction.y + normal.z * direction.z;
             if (Math.Abs(td) < 0.00001)          // прямая параллельна плоскости, не интересно
-            {
                 return null;
-            }
+
             var pointInWorld = MyMath.VertexOnLine(origin, direction, -tn / td);
             if (new Vector(origin, pointInWorld).z / direction.z < 0)     // вектор из полученной точки в ориджин всегда коллинеарен направлению, 
-            {                                                            // но если х1/x2=y1/у2=z1/z2 - отрицательны, они противонаправлены
-                return null;
-            }
+                return null;                                             // но если х1/x2=y1/у2=z1/z2 - отрицательны, они противонаправлены
+
             var pointOnSurface = worldToFaceBasis(pointInWorld);
 
             if (Math.Abs(pointOnSurface.x) <= width / 2 && Math.Abs(pointOnSurface.y) <= height / 2)
-            {
                 return Tuple.Create(pointInWorld, normal);
-            }
+
             return null;
         }
     }
@@ -562,10 +542,7 @@ namespace Room
             this.z = z / normalization;
         }
 
-        public Vector(Vertex p, bool isVectorNeededToBeNormalized = false) : this(p.x, p.y, p.z,
-            isVectorNeededToBeNormalized)
-        {
-        }
+        public Vector(Vertex p, bool isVectorNeededToBeNormalized = false) : this(p.x, p.y, p.z, isVectorNeededToBeNormalized) { }
 
         public Vector(Vertex start, Vertex end, bool isVectorNeededToBeNormalized = false) : this(end.x - start.x, end.y - start.y, end.z - start.z, isVectorNeededToBeNormalized) { }
 
@@ -596,13 +573,6 @@ namespace Room
             this.y = y;
             this.z = z;
         }
-
-        public override string ToString()
-        {
-            return $"({x}, {y}, {z})";
-        }
-
-
     }
 
     class Material
@@ -672,46 +642,27 @@ namespace Room
 
         public double this[int x, int y]
         {
-            get
-            {
-                return matr[x, y];
-            }
-            set
-            {
-                matr[x, y] = value;
-            }
+            get { return matr[x, y]; }
+            set { matr[x, y] = value; }
         }
 
         public static Matrix operator *(Matrix matr, double value)
         {
             var res = new Matrix(matr.rowCount, matr.colCount);
             for (int i = 0; i < matr.rowCount; i++)
-            {
                 for (int j = 0; j < matr.colCount; j++)
-                {
                     res[i, j] = matr[i, j] * value;
-                }
-            }
+
             return res;
         }
 
         public static Matrix operator *(Matrix matrix1, Matrix matrix2)
         {
-            if (matrix1.colCount != matrix2.rowCount)
-            {
-                throw new Exception("Так умножать нельзя...");
-            }
             var res = new Matrix(matrix1.rowCount, matrix2.colCount);
             for (int i = 0; i < res.rowCount; i++)
-            {
                 for (int j = 0; j < res.colCount; j++)
-                {
                     for (var k = 0; k < matrix1.colCount; k++)
-                    {
                         res[i, j] += matrix1[i, k] * matrix2[k, j];
-                    }
-                }
-            }
             return res;
         }
     }
