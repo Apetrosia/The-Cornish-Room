@@ -241,36 +241,108 @@ namespace Room
             return false;
         }
 
-        Vector getLightReflectionRay(Vector shadowRay, Vector normale) => (2 * (shadowRay ^ normale) * normale - shadowRay).normalize();
+        bool doesRayIntersectSomething(Vector direction, Vertex origin, out Tuple<Vertex, Vector> intersection)
+        {
+            intersection = null;
+            foreach (var figure in figures)
+            {
+                if (figure is Face)
+                {
+                    continue;
+                }
+                intersection = figure.getIntersection(direction, origin);
+                if (intersection != null)
+                {
+                    return true;
+                }
+            }
 
-        Vector getViewReflectionRay(Vector viewRay, Vector normale) => (2 * ((-1 * viewRay) ^ normale) * normale - (-1 * viewRay)).normalize();
+            return false;
+        }
 
-        double CalcLightness(Figure figure, Tuple<Vertex, Vector> intersectionAndNormale, Vector viewRay)
+        Vector getLightReflectionRay(Vector shadowRay, Vector normal) => (2 * (shadowRay ^ normal) * normal - shadowRay).normalize();
+
+        Vector getViewReflectionRay(Vector viewRay, Vector normal) => (2 * ((-1 * viewRay) ^ normal) * normal - (-1 * viewRay)).normalize();
+
+        Vector getTransparencyRay(Vector viewRay, Vector normal, double n1, double n2)
+        {
+            // Шаг 1: Нормализация входного вектора и нормали
+            viewRay = viewRay.normalize();
+            normal = normal.normalize();
+
+            // Шаг 2: Отношение показателей преломления
+            double eta = n1 / n2; // Отношение показателей преломления двух сред
+
+            // Шаг 3: Вычисление угла падения (косинус угла между viewRay и нормалью)
+            double cosI = -(viewRay ^ normal);
+
+            // Шаг 4: Обработка случая, когда луч выходит из материала (инвертируем нормаль)
+            if (cosI < 0)
+            {
+                normal = new Vector(-normal.x, -normal.y, -normal.z); // Инвертируем нормаль
+                cosI = -(viewRay ^ normal); // Пересчитываем угол падения
+            }
+
+            // Шаг 5: Проверка полного внутреннего отражения
+            double sinT2 = eta * eta * (1.0 - cosI * cosI); // sin²(θ₂) = η² * (1 - cos²(θ₁))
+            if (sinT2 > 1.0)
+            {
+                // Полное внутреннее отражение: преломление невозможно
+                return new Vector(0, 0, 0);
+            }
+
+            // Шаг 6: Вычисление косинуса угла преломления
+            double cosT = Math.Sqrt(1.0 - sinT2);
+
+            // Шаг 7: Вычисление преломленного вектора
+            // Формула: T = η * I + (η * cosI - cosT) * N
+            Vector refractedRay = eta * viewRay + (eta * cosI - cosT) * normal;
+
+            // Шаг 8: Нормализация результата
+            return refractedRay.normalize();
+        }
+
+        double CalcLightness(Figure figure, Tuple<Vertex, Vector> intersectionAndNormal, Vector viewRay)
         {
             double diffuseLightness = 0;
             double specularLightness = 0;
             double ambientLightness = 1;
+            double transparencyLightness = 0; // Новый компонент для учета прозрачности
 
             foreach (LightSource ls in lightSources)
             {
-                var shadowRay = new Vector(intersectionAndNormale.Item1, ls.location, true);
-                var reflectionRay = getLightReflectionRay(shadowRay, intersectionAndNormale.Item2);
+                var shadowRay = new Vector(intersectionAndNormal.Item1, ls.location, true);
+                var reflectionRay = getLightReflectionRay(shadowRay, intersectionAndNormal.Item2);
+                var transparencyRay = getTransparencyRay(shadowRay, intersectionAndNormal.Item2, 1, figure.material.transparency);
 
-                if (doesRayIntersectSomething(shadowRay, intersectionAndNormale.Item1))
-                    return ambientLightness * figure.material.kambient +
-                                    diffuseLightness * figure.material.kdiffuse +
-                                    specularLightness * figure.material.kspecular;
+                Tuple<Vertex, Vector> intersection;
 
-                diffuseLightness += ls.intensity * MyMath.Clamp(shadowRay ^ intersectionAndNormale.Item2,
-                    0.0, double.MaxValue);
+                // Проверка, перекрыт ли источник света объектом
+                if (doesRayIntersectSomething(shadowRay, intersectionAndNormal.Item1, out intersection))
+                    if (new Vector(intersectionAndNormal.Item1, intersection.Item1).Length() <
+                        new Vector(intersectionAndNormal.Item1, ls.location).Length())
+                    {
+                        // Если луч пересекает объект, уменьшаем интенсивность света
+                        transparencyLightness += figure.material.transparency * ls.intensity;
+                        continue;
+                    }
+
+                // Диффузное освещение
+                diffuseLightness += ls.intensity * MyMath.Clamp(shadowRay ^ intersectionAndNormal.Item2, 0.0, double.MaxValue);
+
+                // Зеркальное освещение
                 specularLightness += ls.intensity *
                                      Math.Pow(MyMath.Clamp(reflectionRay ^ (-1 * viewRay), 0.0, double.MaxValue),
                                          figure.material.shininess);
             }
+
+            // Итоговая освещенность с учетом прозрачности
             return ambientLightness * figure.material.kambient +
-                                    diffuseLightness * figure.material.kdiffuse +
-                                    specularLightness * figure.material.kspecular;
+                   diffuseLightness * figure.material.kdiffuse +
+                   specularLightness * figure.material.kspecular +
+                   transparencyLightness * figure.material.transparency;
         }
+
 
         Color mixColors(Color first, Color second, double secondToFirstRatio)
         {
@@ -283,21 +355,33 @@ namespace Room
             if (depth > 5)
                 return color;
 
+            Figure nearestFigure = null;
+            Tuple<Vertex, Vector> nearestIntersectionAndNormal = null;
+
             Color res = Color.Black;
             foreach (var figure in figures)
             {
-                Tuple<Vertex, Vector> intersectionAndNormale;
-                if ((intersectionAndNormale = figure.getIntersection(viewRay, origin)) != null &&
-                    intersectionAndNormale.Item1.z < nearestVertex)
+                Tuple<Vertex, Vector> intersectionAndNormal;
+
+                if ((intersectionAndNormal = figure.getIntersection(viewRay, origin)) != null &&
+                    intersectionAndNormal.Item1.z < nearestVertex)
                 {
-                    nearestVertex = intersectionAndNormale.Item1.z;
-                    res = CalcColor(figure.color, CalcLightness(figure, intersectionAndNormale, viewRay), lightSources);
-                    if (figure.material.reflectivity > 0)
-                    {
-                        var reflectedColor = shootRay(getViewReflectionRay(viewRay, intersectionAndNormale.Item2), intersectionAndNormale.Item1, res, depth + 1);
-                        res = mixColors(res, reflectedColor, figure.material.reflectivity);
-                    }
+                    nearestVertex = intersectionAndNormal.Item1.z;
+                    nearestIntersectionAndNormal = intersectionAndNormal;
+                    nearestFigure = figure;
                 }
+            }
+
+            res = CalcColor(nearestFigure.color, CalcLightness(nearestFigure, nearestIntersectionAndNormal, viewRay), lightSources);
+            if (nearestFigure.material.reflectivity > 0)
+            {
+                var reflectedColor = shootRay(getViewReflectionRay(viewRay, nearestIntersectionAndNormal.Item2), nearestIntersectionAndNormal.Item1, res, depth + 1);
+                res = mixColors(res, reflectedColor, nearestFigure.material.reflectivity);
+            }
+            if (nearestFigure.material.transparency > 0)
+            {
+                var transperenceColor = shootRay(getTransparencyRay(viewRay, nearestIntersectionAndNormal.Item2, 1, nearestFigure.material.transparency), nearestIntersectionAndNormal.Item1, res, depth + 1);
+                res = mixColors(res, transperenceColor, nearestFigure.material.transparency);
             }
 
             return res;
@@ -308,7 +392,6 @@ namespace Room
             var bm = new Bitmap(width, height);
 
             for (int x = 0; x < width; x++)
-            {
                 for (int y = 0; y < height; y++)
                 {
                     Vector ray = new Vector(
@@ -319,7 +402,6 @@ namespace Room
                     var color = shootRay(ray, cameraPosition, Color.Gray);
                     bm.SetPixel(x, y, color);
                 }
-            }
 
             return bm;
         }
@@ -405,11 +487,11 @@ namespace Room
             Tuple<Vertex, Vector> res = null;
             foreach (var face in faces)
             {
-                Tuple<Vertex, Vector> intersectionAndNormale;
-                if ((intersectionAndNormale = face.getIntersection(direction, origin)) != null && MyMath.Distance(origin, intersectionAndNormale.Item1) < nearestVertex)
+                Tuple<Vertex, Vector> intersectionAndNormal;
+                if ((intersectionAndNormal = face.getIntersection(direction, origin)) != null && MyMath.Distance(origin, intersectionAndNormal.Item1) < nearestVertex)
                 {
-                    nearestVertex = MyMath.Distance(origin, intersectionAndNormale.Item1);
-                    res = intersectionAndNormale;
+                    nearestVertex = MyMath.Distance(origin, intersectionAndNormal.Item1);
+                    res = intersectionAndNormal;
                 }
             }
             return res;
@@ -440,11 +522,11 @@ namespace Room
             Tuple<Vertex, Vector> res = null;
             foreach (var face in faces)
             {
-                Tuple<Vertex, Vector> intersectionAndNormale;
-                if ((intersectionAndNormale = face.getIntersection(direction, origin)) != null)
+                Tuple<Vertex, Vector> intersectionAndNormal;
+                if ((intersectionAndNormal = face.getIntersection(direction, origin)) != null)
                 {
-                    nearestVertex = intersectionAndNormale.Item1.z;
-                    res = intersectionAndNormale;
+                    nearestVertex = intersectionAndNormal.Item1.z;
+                    res = intersectionAndNormal;
                     color = face.color;
                     material = face.material;
                 }
@@ -560,7 +642,7 @@ namespace Room
         public static Vector operator *(Vector a, Vector b) => new Vector(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x);
         public static Vector operator *(double k, Vector b) => new Vector(k * b.x, k * b.y, k * b.z);
         public static double operator ^(Vector a, Vector b) => a.x * b.x + a.y * b.y + a.z * b.z;
-
+        public double Length() => Math.Sqrt(x * x + y * y + z * z);
     }
 
     class Vertex
