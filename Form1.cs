@@ -82,6 +82,7 @@ namespace Room
             rayTracing.addFigure(floor);
             rayTracing.addFigure(rightWall);
             rayTracing.addFigure(leftWall);
+            rayTracing.addFigure(new Sphere(new Vertex(6, -3, 19), 2, Color.Orange, new Material(40, 0.25, 0.7, 0.05, 0, 0)));
             rayTracing.addFigure(new Cube(new Vertex(6, -9, 21), 7, Color.White, new Material(40, 0.25, 0.7, 0.05, 0, 0)));
             rayTracing.addFigure(new Sphere(new Vertex(-5, -8, 20), 5, Color.Bisque, new Material(40, 0.25, 0.7, 0.05, 0, 0)));
 
@@ -159,9 +160,12 @@ namespace Room
             switch (e.Index)
             {
                 case 0:
-                    rayTracing.figures[rayTracing.figures.Count - 2].material.reflectivity = (1 + rayTracing.figures[rayTracing.figures.Count - 2].material.reflectivity) % 2;
+                    rayTracing.figures[rayTracing.figures.Count - 3].material.reflectivity = (1 + rayTracing.figures[rayTracing.figures.Count - 3].material.reflectivity) % 2;
                     break;
                 case 1:
+                    rayTracing.figures[rayTracing.figures.Count - 2].material.reflectivity = (1 + rayTracing.figures[rayTracing.figures.Count - 2].material.reflectivity) % 2;
+                    break;
+                case 2:
                     rayTracing.figures[rayTracing.figures.Count - 1].material.reflectivity = (1 + rayTracing.figures[rayTracing.figures.Count - 1].material.reflectivity) % 2;
                     break;
             }
@@ -227,20 +231,6 @@ namespace Room
 
             return Color.FromArgb(newR, newG, newB);
         }
-
-        bool doesRayIntersectSomething(Vector direction, Vertex origin)
-        {
-            foreach (var figure in figures)
-            {
-                if (figure is Face)
-                    continue;
-                if (figure.getIntersection(direction, origin) != null)
-                    return true;
-            }
-
-            return false;
-        }
-
         bool doesRayIntersectSomething(Vector direction, Vertex origin, out Tuple<Vertex, Vector> intersection)
         {
             intersection = null;
@@ -264,56 +254,16 @@ namespace Room
 
         Vector getViewReflectionRay(Vector viewRay, Vector normal) => (2 * ((-1 * viewRay) ^ normal) * normal - (-1 * viewRay)).normalize();
 
-        Vector getTransparencyRay(Vector viewRay, Vector normal, double n1, double n2)
-        {
-            // Шаг 1: Нормализация входного вектора и нормали
-            viewRay = viewRay.normalize();
-            normal = normal.normalize();
-
-            // Шаг 2: Отношение показателей преломления
-            double eta = n1 / n2; // Отношение показателей преломления двух сред
-
-            // Шаг 3: Вычисление угла падения (косинус угла между viewRay и нормалью)
-            double cosI = -(viewRay ^ normal);
-
-            // Шаг 4: Обработка случая, когда луч выходит из материала (инвертируем нормаль)
-            if (cosI < 0)
-            {
-                normal = new Vector(-normal.x, -normal.y, -normal.z); // Инвертируем нормаль
-                cosI = -(viewRay ^ normal); // Пересчитываем угол падения
-            }
-
-            // Шаг 5: Проверка полного внутреннего отражения
-            double sinT2 = eta * eta * (1.0 - cosI * cosI); // sin²(θ₂) = η² * (1 - cos²(θ₁))
-            if (sinT2 > 1.0)
-            {
-                // Полное внутреннее отражение: преломление невозможно
-                return new Vector(0, 0, 0);
-            }
-
-            // Шаг 6: Вычисление косинуса угла преломления
-            double cosT = Math.Sqrt(1.0 - sinT2);
-
-            // Шаг 7: Вычисление преломленного вектора
-            // Формула: T = η * I + (η * cosI - cosT) * N
-            Vector refractedRay = eta * viewRay + (eta * cosI - cosT) * normal;
-
-            // Шаг 8: Нормализация результата
-            return refractedRay.normalize();
-        }
-
         double CalcLightness(Figure figure, Tuple<Vertex, Vector> intersectionAndNormal, Vector viewRay)
         {
             double diffuseLightness = 0;
             double specularLightness = 0;
             double ambientLightness = 1;
-            double transparencyLightness = 0; // Новый компонент для учета прозрачности
 
             foreach (LightSource ls in lightSources)
             {
                 var shadowRay = new Vector(intersectionAndNormal.Item1, ls.location, true);
                 var reflectionRay = getLightReflectionRay(shadowRay, intersectionAndNormal.Item2);
-                var transparencyRay = getTransparencyRay(shadowRay, intersectionAndNormal.Item2, 1, figure.material.transparency);
 
                 Tuple<Vertex, Vector> intersection;
 
@@ -321,11 +271,7 @@ namespace Room
                 if (doesRayIntersectSomething(shadowRay, intersectionAndNormal.Item1, out intersection))
                     if (new Vector(intersectionAndNormal.Item1, intersection.Item1).Length() <
                         new Vector(intersectionAndNormal.Item1, ls.location).Length())
-                    {
-                        // Если луч пересекает объект, уменьшаем интенсивность света
-                        transparencyLightness += figure.material.transparency * ls.intensity;
                         continue;
-                    }
 
                 // Диффузное освещение
                 diffuseLightness += ls.intensity * MyMath.Clamp(shadowRay ^ intersectionAndNormal.Item2, 0.0, double.MaxValue);
@@ -339,10 +285,8 @@ namespace Room
             // Итоговая освещенность с учетом прозрачности
             return ambientLightness * figure.material.kambient +
                    diffuseLightness * figure.material.kdiffuse +
-                   specularLightness * figure.material.kspecular +
-                   transparencyLightness * figure.material.transparency;
+                   specularLightness * figure.material.kspecular;
         }
-
 
         Color mixColors(Color first, Color second, double secondToFirstRatio)
         {
@@ -352,8 +296,8 @@ namespace Room
         Color shootRay(Vector viewRay, Vertex origin, Color color, int depth = 0)
         {
             double nearestVertex = double.MaxValue;
-            if (depth > 5)
-                return color;
+            if (depth > 3)
+                return Color.Gray;
 
             Figure nearestFigure = null;
             Tuple<Vertex, Vector> nearestIntersectionAndNormal = null;
@@ -377,11 +321,6 @@ namespace Room
             {
                 var reflectedColor = shootRay(getViewReflectionRay(viewRay, nearestIntersectionAndNormal.Item2), nearestIntersectionAndNormal.Item1, res, depth + 1);
                 res = mixColors(res, reflectedColor, nearestFigure.material.reflectivity);
-            }
-            if (nearestFigure.material.transparency > 0)
-            {
-                var transperenceColor = shootRay(getTransparencyRay(viewRay, nearestIntersectionAndNormal.Item2, 1, nearestFigure.material.transparency), nearestIntersectionAndNormal.Item1, res, depth + 1);
-                res = mixColors(res, transperenceColor, nearestFigure.material.transparency);
             }
 
             return res;
@@ -441,20 +380,14 @@ namespace Room
             {
                 Vertex projection = MyMath.GetVertexProjection(origin, direction, center);
                 if (MyMath.Distance(center, projection) > radius)
-                {
                     return null;
-                }
                 else
                 {
                     double Distance = Math.Sqrt(Math.Pow(radius, 2) - Math.Pow(MyMath.Distance(center, projection), 2));
                     if (MyMath.Distance(origin, center) > radius)
-                    {
                         Distance = MyMath.Distance(origin, projection) - Distance;
-                    }
                     else
-                    {
                         Distance = MyMath.Distance(origin, projection) + Distance;
-                    }
                     var intersection = MyMath.VertexOnLine(origin, direction, Distance);
                     return Tuple.Create(intersection, new Vector(center, intersection, true));
                 }
@@ -708,12 +641,9 @@ namespace Room
         public Matrix fill(params double[] elems)
         {
             for (int i = 0; i < rowCount; i++)
-            {
                 for (int j = 0; j < colCount; j++)
-                {
                     matr[i, j] = elems[i * colCount + j];
-                }
-            }
+
             return this;
         }
 

@@ -186,11 +186,12 @@
             // 
             this.checkedListBox2.FormattingEnabled = true;
             this.checkedListBox2.Items.AddRange(new object[] {
+            "Маленький шар",
             "Куб",
-            "Шар"});
+            "большой шар"});
             this.checkedListBox2.Location = new System.Drawing.Point(708, 293);
             this.checkedListBox2.Name = "checkedListBox2";
-            this.checkedListBox2.Size = new System.Drawing.Size(237, 50);
+            this.checkedListBox2.Size = new System.Drawing.Size(237, 73);
             this.checkedListBox2.TabIndex = 9;
             this.checkedListBox2.ItemCheck += new System.Windows.Forms.ItemCheckEventHandler(this.checkedListBox2_ItemCheck);
             // 
